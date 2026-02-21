@@ -1,14 +1,12 @@
-
-
-from unittest import result
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 import json
 from pydantic import BaseModel
-from main_agent import final_agent
+from main_agent import EmailContext, final_agent
 
 class AgentInput(BaseModel):
     question:str
+    conversation_id: int = 123
     
 router = APIRouter()
 
@@ -17,8 +15,11 @@ def agent_endpoint(input: AgentInput):
     try:
         async def event_generator():
             try:
-                async for event in final_agent.astream(
+                config = {"configurable":{"thread_id": input.conversation_id}}
+                for event in final_agent.stream(
                     {"messages": [{"role": "user", "content": input.question}]},
+                    config=config,
+                    context=EmailContext(),
                     stream_mode="messages"
                 ):
                     # Extract content from the event

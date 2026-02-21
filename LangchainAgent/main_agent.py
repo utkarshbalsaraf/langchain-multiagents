@@ -2,13 +2,13 @@ from dataclasses import dataclass
 from typing import Callable
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
-import pprint
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 from langchain.agents import create_agent, AgentState
 from langchain.messages import ToolMessage
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, dynamic_prompt
-from sub_agent1 import email_agent
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse,HumanInTheLoopMiddleware, dynamic_prompt
+
 load_dotenv()
 
 @dataclass
@@ -57,7 +57,7 @@ def authenticate(email:str, password:str, runtime:ToolRuntime) -> Command:
         })
         
 @wrap_model_call
-def dynamic_tool_call_agent(request: ModelRequest, handler:Callable[[ModelRequest],ModelResponse]) -> ModelResponse:
+def dynamic_tool_call(request: ModelRequest, handler:Callable[[ModelRequest],ModelResponse]) -> ModelResponse:
     """A middleware that dynamically adds tools based on the agent's state"""
     
     authenticated = request.state.get("authenticated")
@@ -83,7 +83,7 @@ def get_dynamic_prompt(request:ModelRequest) -> str:
         return unauthenticated_prompt
     
 model = ChatGoogleGenerativeAI(
-    model="gemini-3.0-flash-preview",
+    model="gemini-2.5-flash",
     temperature=0.2,
     max_output_tokens=2000,
     streaming=True
@@ -91,9 +91,22 @@ model = ChatGoogleGenerativeAI(
 
 final_agent = create_agent(
     model=model,
-    tools=[email_agent],
+    tools=[check_inbox, send_email, authenticate],
+    checkpointer=InMemorySaver(),
+    state_schema=AuthenticationState,
+    context_schema=EmailContext,
+    middleware=[
+        dynamic_tool_call,
+        get_dynamic_prompt,
+        HumanInTheLoopMiddleware(
+            interrupt_on={
+                "authenticate": False,
+                "check_inbox": False,
+                "send_email": True
+            }
+        )
+        ],
     system_prompt="You are a helpful assistant. who response in one line",
-    
 )
 
 # result = final_agent.invoke({"messages": [{"role": "user", "content": "What's the weather in NYC?"}]})
